@@ -3,7 +3,8 @@ function project(lng, lat, centerLng, centerLat, scale, w, h) {
   const x = (lng - centerLng) * scale + w / 2
   const latR = (lat * Math.PI) / 180
   const cLatR = (centerLat * Math.PI) / 180
-  const y = -(Math.log(Math.tan(Math.PI / 4 + latR / 2)) - Math.log(Math.tan(Math.PI / 4 + cLatR / 2))) * scale + h / 2
+  // Mercator y is in radians; multiply by 180/π to match scale (pixels/degree)
+  const y = -(Math.log(Math.tan(Math.PI / 4 + latR / 2)) - Math.log(Math.tan(Math.PI / 4 + cLatR / 2))) * scale * (180 / Math.PI) + h / 2
   return [x, y]
 }
 
