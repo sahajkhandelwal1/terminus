@@ -1,14 +1,24 @@
-// Vercel edge function — proxies Overpass API to avoid CORS + browser blocks.
-// In dev, Vite proxy handles /api/osm directly (see vite.config.js).
+// Vercel edge function — proxies Overpass API requests.
+// In dev, the Vite proxy handles /api/osm directly (see vite.config.js).
+// Client sends application/x-www-form-urlencoded with data=<query>,
+// which we forward unchanged to Overpass.
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
     return
   }
 
-  const { query } = req.body || {}
+  // Vercel parses the body; we need to re-encode it for Overpass
+  let query
+  if (typeof req.body === 'string') {
+    // Raw form-encoded string
+    query = new URLSearchParams(req.body).get('data')
+  } else if (req.body?.data) {
+    query = req.body.data
+  }
+
   if (!query) {
-    res.status(400).json({ error: 'Missing query' })
+    res.status(400).json({ error: 'Missing Overpass query in request body' })
     return
   }
 
@@ -20,7 +30,8 @@ export default async function handler(req, res) {
     })
 
     if (!upstream.ok) {
-      res.status(upstream.status).json({ error: `Overpass returned ${upstream.status}` })
+      const text = await upstream.text().catch(() => '')
+      res.status(upstream.status).json({ error: `Overpass returned ${upstream.status}`, detail: text.slice(0, 200) })
       return
     }
 

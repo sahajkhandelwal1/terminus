@@ -1,14 +1,13 @@
-// In dev: Vite proxies /api/osm → overpass-api.de (vite.config.js)
+// In dev: Vite proxies /api/osm → overpass-api.de/api/interpreter (vite.config.js)
 // In prod: Vercel function api/osm.js proxies the same request
+// Both receive the same form-encoded body that Overpass expects.
 const OSM_ENDPOINT = '/api/osm'
 
 const cache = new Map()
 const CACHE_TTL = 15 * 60 * 1000
 
 function getBbox(centerLat, centerLng, zoom) {
-  // Degrees of longitude radius to fetch — wider at lower zoom
   const radiusLng = 0.8 / Math.pow(2, zoom - 10)
-  // Approximate latitude radius (Mercator compression near poles)
   const radiusLat = radiusLng * Math.cos((centerLat * Math.PI) / 180)
   return {
     south: centerLat - radiusLat,
@@ -22,7 +21,6 @@ function buildQuery(bbox, zoom) {
   const { south, west, north, east } = bbox
   const b = `${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)}`
   const buildings = zoom >= 14 ? `way["building"](${b});` : ''
-
   return `[out:json][timeout:30];
 (
   way["highway"](${b});
@@ -39,7 +37,8 @@ out body qt;`
 }
 
 export function parseOSMData(rawData) {
-  if (!rawData?.elements?.length) return { roads: { motorway: [], trunk: [], primary: [], secondary: [], tertiary: [], residential: [], path: [] }, water: [], green: [], railways: [], buildings: [] }
+  const empty = { roads: { motorway: [], trunk: [], primary: [], secondary: [], tertiary: [], residential: [], path: [] }, water: [], green: [], railways: [], buildings: [] }
+  if (!rawData?.elements?.length) return empty
 
   const nodes = new Map()
   for (const el of rawData.elements) {
@@ -57,13 +56,13 @@ export function parseOSMData(rawData) {
 
     if (t.highway) {
       const h = t.highway
-      if      (h === 'motorway' || h === 'motorway_link')                        roads.motorway.push(coords)
-      else if (h === 'trunk'    || h === 'trunk_link')                           roads.trunk.push(coords)
-      else if (h === 'primary'  || h === 'primary_link')                         roads.primary.push(coords)
-      else if (h === 'secondary'|| h === 'secondary_link')                       roads.secondary.push(coords)
-      else if (h === 'tertiary' || h === 'tertiary_link' || h === 'unclassified') roads.tertiary.push(coords)
-      else if (h === 'residential' || h === 'living_street' || h === 'service')  roads.residential.push(coords)
-      else if (h === 'footway'  || h === 'cycleway' || h === 'path' || h === 'pedestrian') roads.path.push(coords)
+      if      (h === 'motorway'   || h === 'motorway_link')                          roads.motorway.push(coords)
+      else if (h === 'trunk'      || h === 'trunk_link')                             roads.trunk.push(coords)
+      else if (h === 'primary'    || h === 'primary_link')                           roads.primary.push(coords)
+      else if (h === 'secondary'  || h === 'secondary_link')                         roads.secondary.push(coords)
+      else if (h === 'tertiary'   || h === 'tertiary_link' || h === 'unclassified')  roads.tertiary.push(coords)
+      else if (h === 'residential'|| h === 'living_street' || h === 'service')       roads.residential.push(coords)
+      else if (h === 'footway'    || h === 'cycleway' || h === 'path' || h === 'pedestrian') roads.path.push(coords)
     } else if (t.natural === 'water' || t.waterway) {
       water.push(coords)
     } else if (t.landuse || t.leisure || t.natural === 'wood' || t.natural === 'scrub' || t.natural === 'grassland') {
@@ -87,16 +86,21 @@ export async function fetchOSMData(centerLat, centerLng, zoom) {
   const bbox = getBbox(centerLat, centerLng, roundedZoom)
   const query = buildQuery(bbox, roundedZoom)
 
+  // Send as form-encoded — same format Overpass expects natively.
+  // The Vite proxy (dev) and api/osm.js (prod) both forward this unchanged.
   const res = await fetch(OSM_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `data=${encodeURIComponent(query)}`,
   })
 
-  if (!res.ok) throw new Error(`OSM fetch failed: ${res.status}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`OSM fetch failed (${res.status})${text ? ': ' + text.slice(0, 120) : ''}`)
+  }
 
   const json = await res.json()
-  if (json.error) throw new Error(`Overpass error: ${json.error}`)
+  if (json.error) throw new Error(`Overpass: ${json.error}`)
 
   const data = parseOSMData(json)
   cache.set(key, { data, timestamp: Date.now() })
