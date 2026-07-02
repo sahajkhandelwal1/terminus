@@ -8,20 +8,15 @@ const DEFAULT_LAYERS = {
   parks: true,
   buildings: true,
   railways: true,
-  labels: true,
 }
 
-export function useMapStyle(mapRef) {
+export function useMapStyle() {
   const [activePreset, setActivePreset] = useState('noir')
   const [layerVisibility, setLayerVisibility] = useState(DEFAULT_LAYERS)
-  const [layerColors, setLayerColors] = useState({
-    roads: PRESETS.noir.roads,
-    water: PRESETS.noir.water,
-    parks: PRESETS.noir.parks,
-    buildings: PRESETS.noir.buildings,
-    text: PRESETS.noir.text,
-    background: PRESETS.noir.background,
-  })
+
+  // Resolved preset: start from the named preset, allow per-layer color overrides
+  const [colorOverrides, setColorOverrides] = useState({})
+
   const [typography, setTypography] = useState({
     headline: '',
     subheadline: '',
@@ -39,26 +34,25 @@ export function useMapStyle(mapRef) {
   })
   const [shapeMask, setShapeMask] = useState('rectangle')
 
-  const applyPreset = useCallback((presetKey) => {
-    const preset = PRESETS[presetKey]
-    if (!preset) return
-    setActivePreset(presetKey)
-    setLayerColors({
-      roads: preset.roads,
-      water: preset.water,
-      parks: preset.parks,
-      buildings: preset.buildings,
-      text: preset.text,
-      background: preset.background,
-    })
+  // The resolved preset object passed to the renderer
+  const resolvedPreset = {
+    ...PRESETS[activePreset],
+    ...colorOverrides,
+  }
+
+  const applyPreset = useCallback((key) => {
+    if (!PRESETS[key]) return
+    setActivePreset(key)
+    setColorOverrides({})
   }, [])
 
   const toggleLayer = useCallback((layer) => {
     setLayerVisibility((prev) => ({ ...prev, [layer]: !prev[layer] }))
   }, [])
 
-  const setLayerColor = useCallback((layer, color) => {
-    setLayerColors((prev) => ({ ...prev, [layer]: color }))
+  // Override a top-level color key (e.g. 'waterFill', 'background')
+  const setLayerColor = useCallback((key, color) => {
+    setColorOverrides((prev) => ({ ...prev, [key]: color }))
     setActivePreset('custom')
   }, [])
 
@@ -73,7 +67,7 @@ export function useMapStyle(mapRef) {
   return {
     activePreset,
     layerVisibility,
-    layerColors,
+    resolvedPreset,
     typography,
     format,
     shapeMask,

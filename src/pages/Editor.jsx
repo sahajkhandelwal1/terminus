@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import PosterPreview from '../components/map/PosterPreview.jsx'
 import SearchBar from '../components/map/SearchBar.jsx'
@@ -14,14 +14,15 @@ export default function Editor() {
   const navigate = useNavigate()
   const initialQuery = searchParams.get('q') || ''
   const [location, setLocation] = useState(DEFAULT_LOCATION)
-  const mapRef = useRef(null)
   const overlayRef = useRef(null)
   const posterRef = useRef(null)
+  // mapRef used only by useExport for canvas capture
+  const mapRef = useRef(null)
 
   const {
     activePreset,
     layerVisibility,
-    layerColors,
+    resolvedPreset,
     typography,
     format,
     shapeMask,
@@ -31,18 +32,12 @@ export default function Editor() {
     updateTypography,
     updateFormat,
     setShapeMask,
-  } = useMapStyle(mapRef)
+  } = useMapStyle()
 
   const { exportPNG, exporting, error: exportError } = useExport(mapRef, overlayRef)
 
   useEffect(() => {
-    if (initialQuery) {
-      updateTypography({ headline: initialQuery })
-    }
-  }, [])
-
-  const handleMapReady = useCallback((map) => {
-    mapRef.current = map
+    if (initialQuery) updateTypography({ headline: initialQuery })
   }, [])
 
   function handleLocationSelect(result) {
@@ -51,25 +46,18 @@ export default function Editor() {
       headline: result.shortName,
       subheadline: `${result.lat.toFixed(4)}° N, ${Math.abs(result.lng).toFixed(4)}° ${result.lng < 0 ? 'W' : 'E'}`,
     })
-    if (mapRef.current) {
-      mapRef.current.flyTo({
-        center: [result.lng, result.lat],
-        zoom: 13,
-        duration: 1400,
-        essential: true,
-      })
-    }
   }
 
   return (
     <div className="h-screen w-screen flex bg-surface overflow-hidden">
-      {/* Studio / poster preview area */}
+      {/* Studio / poster preview */}
       <div className="flex-1 relative overflow-hidden">
         <PosterPreview
           ref={posterRef}
           center={[location.lng, location.lat]}
           zoom={13}
-          onMapReady={handleMapReady}
+          preset={resolvedPreset}
+          layerVisibility={layerVisibility}
           typography={typography}
           format={format}
           shapeMask={shapeMask}
@@ -87,7 +75,12 @@ export default function Editor() {
           <CustomizationPanel
             activePreset={activePreset}
             layerVisibility={layerVisibility}
-            layerColors={layerColors}
+            layerColors={{
+              background: resolvedPreset.background,
+              water: resolvedPreset.waterFill,
+              parks: resolvedPreset.greenFill,
+              buildings: resolvedPreset.buildingFill,
+            }}
             typography={typography}
             format={format}
             shapeMask={shapeMask}
