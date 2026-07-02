@@ -2,102 +2,106 @@ import { useRef, useEffect, useCallback, useState } from 'react'
 import { fetchOSMData } from '../../lib/osmFetcher.js'
 import { renderArt } from '../../lib/artRenderer.js'
 
-// pixels per degree longitude at a given conceptual zoom
 function zoomToScale(zoom, dpr = 1) {
   return (256 * Math.pow(2, zoom) / 360) * dpr
 }
 
-export default function ArtCanvas({ center, zoom: initZoom = 13, preset, layerVisibility, onLoadStart, onLoadEnd }) {
-  const canvasRef = useRef(null)
+export default function ArtCanvas({ center, zoom: initZoom = 13, preset, layerVisibility }) {
+  const canvasRef  = useRef(null)
   const containerRef = useRef(null)
-  const viewportRef = useRef({ centerLng: center[0], centerLat: center[1], zoom: initZoom })
-  const osmDataRef = useRef(null)
-  const isDragging = useRef(false)
-  const lastPointer = useRef(null)
-  const panMoved = useRef(false)
-  const renderScheduled = useRef(false)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [visible, setVisible] = useState(false)
+  const viewportRef  = useRef({ centerLng: center[0], centerLat: center[1], zoom: initZoom })
+  const osmDataRef   = useRef(null)
+  const rafRef       = useRef(null)
+  const isDragging   = useRef(false)
+  const lastPointer  = useRef(null)
+  const panMoved     = useRef(false)
+  const zoomTimer    = useRef(null)
 
-  // ── Canvas sizing ──────────────────────────────────────────────────────────
-  function resizeCanvas() {
-    const canvas = canvasRef.current
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState(null)
+  const [ready,   setReady]   = useState(false)   // true once canvas has real dimensions
+
+  // ── Sizing ─────────────────────────────────────────────────────────────────
+  // Returns true if canvas now has valid dimensions, false if container is 0×0.
+  function syncCanvasSize() {
+    const canvas    = canvasRef.current
     const container = containerRef.current
-    if (!canvas || !container) return
+    if (!canvas || !container) return false
     const dpr = window.devicePixelRatio || 1
     const w = container.clientWidth
     const h = container.clientHeight
-    if (canvas.width === w * dpr && canvas.height === h * dpr) return
-    canvas.width = w * dpr
-    canvas.height = h * dpr
-    canvas.style.width = `${w}px`
-    canvas.style.height = `${h}px`
+    if (w === 0 || h === 0) return false
+    const needsResize = canvas.width !== w * dpr || canvas.height !== h * dpr
+    if (needsResize) {
+      canvas.width  = w * dpr
+      canvas.height = h * dpr
+      canvas.style.width  = `${w}px`
+      canvas.style.height = `${h}px`
+    }
+    return true
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const scheduleRender = useCallback(() => {
-    if (renderScheduled.current) return
-    renderScheduled.current = true
-    requestAnimationFrame(() => {
-      renderScheduled.current = false
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      if (!syncCanvasSize()) return          // canvas not ready — bail
       const canvas = canvasRef.current
-      const data = osmDataRef.current
+      const data   = osmDataRef.current
       if (!canvas || !data || !preset) return
       const dpr = window.devicePixelRatio || 1
       const { centerLng, centerLat, zoom } = viewportRef.current
-      renderArt(canvas, data, { centerLng, centerLat, scale: zoomToScale(zoom, dpr) }, preset, layerVisibility)
+      renderArt(
+        canvas, data,
+        { centerLng, centerLat, scale: zoomToScale(zoom, dpr) },
+        preset, layerVisibility,
+      )
     })
   }, [preset, layerVisibility])
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchAndRender = useCallback(async (lat, lng, zoom) => {
     setLoading(true)
-    setVisible(false)
     setError(null)
-    onLoadStart?.()
+    setReady(false)
     try {
       const data = await fetchOSMData(lat, lng, zoom)
       osmDataRef.current = data
       scheduleRender()
-      // Small delay so canvas paints before we reveal it
-      setTimeout(() => setVisible(true), 40)
+      // Show canvas once the RAF paint has likely completed
+      requestAnimationFrame(() => requestAnimationFrame(() => setReady(true)))
     } catch (err) {
-      setError('Could not load map data — check your connection and try again.')
-      console.error(err)
+      console.error('[ArtCanvas] fetch failed:', err)
+      setError(err.message || 'Could not load map data')
     } finally {
       setLoading(false)
-      onLoadEnd?.()
     }
-  }, [scheduleRender, onLoadStart, onLoadEnd])
+  }, [scheduleRender])
 
-  // ── Sync incoming center prop (new search result) ─────────────────────────
+  // ── Sync center from parent (new search) ──────────────────────────────────
   useEffect(() => {
     viewportRef.current.centerLng = center[0]
     viewportRef.current.centerLat = center[1]
     fetchAndRender(center[1], center[0], viewportRef.current.zoom)
   }, [center[0], center[1]])
 
-  // ── Re-render on style / visibility change (no fetch) ────────────────────
-  useEffect(() => {
-    scheduleRender()
-  }, [preset, layerVisibility])
+  // ── Re-render when preset/layers change (no fetch) ────────────────────────
+  useEffect(() => { scheduleRender() }, [preset, layerVisibility])
 
-  // ── Setup canvas + resize observer ────────────────────────────────────────
+  // ── ResizeObserver: resize canvas whenever the container changes ──────────
   useEffect(() => {
-    resizeCanvas()
     const ro = new ResizeObserver(() => {
-      resizeCanvas()
-      scheduleRender()
+      if (syncCanvasSize()) scheduleRender()
     })
     if (containerRef.current) ro.observe(containerRef.current)
     return () => ro.disconnect()
-  }, [])
+  }, [scheduleRender])
 
   // ── Pan ────────────────────────────────────────────────────────────────────
   function onPointerDown(e) {
     isDragging.current = true
-    panMoved.current = false
+    panMoved.current   = false
     lastPointer.current = { x: e.clientX, y: e.clientY }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
@@ -106,14 +110,13 @@ export default function ArtCanvas({ center, zoom: initZoom = 13, preset, layerVi
     if (!isDragging.current) return
     const dx = e.clientX - lastPointer.current.x
     const dy = e.clientY - lastPointer.current.y
-    if (Math.abs(dx) + Math.abs(dy) < 2) return
+    if (Math.abs(dx) + Math.abs(dy) < 1) return
     panMoved.current = true
     lastPointer.current = { x: e.clientX, y: e.clientY }
 
     const dpr = window.devicePixelRatio || 1
     const { zoom, centerLat } = viewportRef.current
-    const scale = zoomToScale(zoom, dpr)
-    // dy in lat: inverse Mercator approximation (good for small pans)
+    const scale    = zoomToScale(zoom, dpr)
     const latScale = scale / Math.cos((centerLat * Math.PI) / 180)
     viewportRef.current.centerLng -= (dx * dpr) / scale
     viewportRef.current.centerLat += (dy * dpr) / latScale
@@ -130,7 +133,6 @@ export default function ArtCanvas({ center, zoom: initZoom = 13, preset, layerVi
   }
 
   // ── Zoom ───────────────────────────────────────────────────────────────────
-  const zoomTimer = useRef(null)
   function onWheel(e) {
     e.preventDefault()
     const delta = e.deltaY < 0 ? 0.4 : -0.4
@@ -144,7 +146,11 @@ export default function ArtCanvas({ center, zoom: initZoom = 13, preset, layerVi
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full relative select-none" style={{ cursor: isDragging.current ? 'grabbing' : 'grab' }}>
+    <div
+      ref={containerRef}
+      className="w-full h-full relative select-none overflow-hidden"
+      style={{ cursor: isDragging.current ? 'grabbing' : 'grab' }}
+    >
       <canvas
         ref={canvasRef}
         onPointerDown={onPointerDown}
@@ -152,37 +158,35 @@ export default function ArtCanvas({ center, zoom: initZoom = 13, preset, layerVi
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
         onWheel={onWheel}
-        className="block"
+        className="block w-full h-full"
         style={{
-          opacity: visible ? 1 : 0,
+          opacity: ready ? 1 : 0,
           transition: 'opacity 0.5s ease',
         }}
       />
 
-      {/* Loading state */}
       {loading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
-          <div className="flex gap-1">
-            {[0, 1, 2, 3].map((i) => (
+          <div className="flex gap-1.5 items-end h-6">
+            {[0.4, 0.7, 1.0, 0.7, 0.4].map((h, i) => (
               <div
                 key={i}
-                className="w-1 h-6 rounded-full bg-current opacity-60 animate-pulse"
-                style={{ animationDelay: `${i * 120}ms` }}
+                className="w-0.5 rounded-full bg-current animate-pulse"
+                style={{ height: `${h * 100}%`, animationDelay: `${i * 100}ms`, opacity: 0.4 }}
               />
             ))}
           </div>
-          <p className="text-xs tracking-widest uppercase opacity-40">
-            Fetching network…
+          <p className="text-[10px] tracking-[0.2em] uppercase opacity-30">
+            Fetching network
           </p>
         </div>
       )}
 
-      {/* Error state */}
       {error && !loading && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center px-8">
-            <p className="text-sm opacity-60 mb-2">Network unavailable</p>
-            <p className="text-xs opacity-40">{error}</p>
+        <div className="absolute inset-0 flex items-center justify-center p-8">
+          <div className="text-center space-y-2">
+            <p className="text-xs opacity-50">Could not load map data</p>
+            <p className="text-[10px] opacity-30 font-mono">{error}</p>
           </div>
         </div>
       )}
