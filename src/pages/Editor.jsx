@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import MapCanvas from '../components/map/MapCanvas.jsx'
-import MapOverlay from '../components/map/MapOverlay.jsx'
+import PosterPreview from '../components/map/PosterPreview.jsx'
 import SearchBar from '../components/map/SearchBar.jsx'
 import CustomizationPanel from '../components/editor/CustomizationPanel.jsx'
 import ExportPanel from '../components/print/ExportPanel.jsx'
@@ -10,12 +9,6 @@ import { useExport } from '../hooks/useExport.js'
 
 const DEFAULT_LOCATION = { lat: 41.8781, lng: -87.6298, shortName: 'Chicago' }
 
-const SHAPE_CLIP = {
-  rectangle: 'none',
-  circle: 'circle(50% at 50% 50%)',
-  hexagon: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
-}
-
 export default function Editor() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -23,6 +16,7 @@ export default function Editor() {
   const [location, setLocation] = useState(DEFAULT_LOCATION)
   const mapRef = useRef(null)
   const overlayRef = useRef(null)
+  const posterRef = useRef(null)
 
   const {
     activePreset,
@@ -67,33 +61,28 @@ export default function Editor() {
     }
   }
 
-  const clipPath = SHAPE_CLIP[shapeMask] || 'none'
-
   return (
     <div className="h-screen w-screen flex bg-surface overflow-hidden">
-      {/* Map area */}
+      {/* Studio / poster preview area */}
       <div className="flex-1 relative overflow-hidden">
-        <div
-          className="w-full h-full relative"
-          style={{ clipPath: clipPath !== 'none' ? clipPath : undefined }}
-        >
-          <MapCanvas
-            center={[location.lng, location.lat]}
-            zoom={13}
-            onMapReady={handleMapReady}
-          />
-          <MapOverlay ref={overlayRef} typography={typography} />
-        </div>
+        <PosterPreview
+          ref={posterRef}
+          center={[location.lng, location.lat]}
+          zoom={13}
+          onMapReady={handleMapReady}
+          typography={typography}
+          format={format}
+          shapeMask={shapeMask}
+          overlayRef={overlayRef}
+        />
       </div>
 
       {/* Sidebar */}
       <div className="w-72 bg-panel border-l border-border flex flex-col shrink-0">
-        {/* Search */}
         <div className="p-3 border-b border-border">
           <SearchBar initialQuery={initialQuery} onSelect={handleLocationSelect} />
         </div>
 
-        {/* Customization panel */}
         <div className="flex-1 overflow-hidden">
           <CustomizationPanel
             activePreset={activePreset}
@@ -111,7 +100,6 @@ export default function Editor() {
           />
         </div>
 
-        {/* Export */}
         <ExportPanel
           onExportPNG={() => exportPNG(location.shortName)}
           onOrderPrint={() => navigate('/checkout')}
