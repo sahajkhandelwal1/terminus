@@ -1,10 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import MapCanvas from '../components/map/MapCanvas.jsx'
 import MapOverlay from '../components/map/MapOverlay.jsx'
 import SearchBar from '../components/map/SearchBar.jsx'
 import CustomizationPanel from '../components/editor/CustomizationPanel.jsx'
+import ExportPanel from '../components/print/ExportPanel.jsx'
 import { useMapStyle } from '../hooks/useMapStyle.js'
+import { useExport } from '../hooks/useExport.js'
 
 const DEFAULT_LOCATION = { lat: 41.8781, lng: -87.6298, shortName: 'Chicago' }
 
@@ -16,9 +18,11 @@ const SHAPE_CLIP = {
 
 export default function Editor() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const initialQuery = searchParams.get('q') || ''
   const [location, setLocation] = useState(DEFAULT_LOCATION)
   const mapRef = useRef(null)
+  const overlayRef = useRef(null)
 
   const {
     activePreset,
@@ -34,6 +38,8 @@ export default function Editor() {
     updateFormat,
     setShapeMask,
   } = useMapStyle(mapRef)
+
+  const { exportPNG, exporting, error: exportError } = useExport(mapRef, overlayRef)
 
   useEffect(() => {
     if (initialQuery) {
@@ -76,7 +82,7 @@ export default function Editor() {
             zoom={13}
             onMapReady={handleMapReady}
           />
-          <MapOverlay typography={typography} />
+          <MapOverlay ref={overlayRef} typography={typography} />
         </div>
       </div>
 
@@ -106,14 +112,12 @@ export default function Editor() {
         </div>
 
         {/* Export */}
-        <div className="p-4 border-t border-border space-y-2 shrink-0">
-          <button className="w-full bg-accent text-surface py-3 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
-            Download Free PNG
-          </button>
-          <button className="w-full border border-border text-accent/70 py-2.5 rounded-lg text-sm hover:border-accent/40 transition-colors">
-            Order Print — from $29
-          </button>
-        </div>
+        <ExportPanel
+          onExportPNG={() => exportPNG(location.shortName)}
+          onOrderPrint={() => navigate('/checkout')}
+          exporting={exporting}
+          exportError={exportError}
+        />
       </div>
     </div>
   )

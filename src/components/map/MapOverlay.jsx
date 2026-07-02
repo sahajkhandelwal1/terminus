@@ -1,5 +1,8 @@
-// Typography and border overlay composited on top of the MapLibre canvas
-export default function MapOverlay({ typography, borderStyle }) {
+import { forwardRef } from 'react'
+
+// Typography and border overlay composited on top of the MapLibre canvas.
+// Exposed via forwardRef so the export hook can capture it with html2canvas.
+const MapOverlay = forwardRef(function MapOverlay({ typography }, ref) {
   const { headline, subheadline, font, size, weight, letterSpacing, color, position } =
     typography || {}
 
@@ -14,6 +17,7 @@ export default function MapOverlay({ typography, borderStyle }) {
 
   return (
     <div
+      ref={ref}
       className={`absolute flex pointer-events-none ${positionClass}`}
       style={{ fontFamily: font || 'Inter' }}
     >
@@ -46,4 +50,6 @@ export default function MapOverlay({ typography, borderStyle }) {
       )}
     </div>
   )
-}
+})
+
+export default MapOverlay
