@@ -13,7 +13,17 @@ export default function Editor() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const initialQuery = searchParams.get('q') || ''
-  const [location, setLocation] = useState(DEFAULT_LOCATION)
+
+  // If the home page passed explicit coords (from the dropdown selection), use them
+  const paramLat  = parseFloat(searchParams.get('lat'))
+  const paramLng  = parseFloat(searchParams.get('lng'))
+  const paramName = searchParams.get('name') || initialQuery
+
+  const [location, setLocation] = useState(
+    !isNaN(paramLat) && !isNaN(paramLng)
+      ? { lat: paramLat, lng: paramLng, shortName: paramName }
+      : DEFAULT_LOCATION
+  )
   const overlayRef = useRef(null)
   const posterRef = useRef(null)
   // mapRef used only by useExport for canvas capture
@@ -37,7 +47,12 @@ export default function Editor() {
   const { exportPNG, exporting, error: exportError } = useExport(mapRef, overlayRef)
 
   useEffect(() => {
-    if (initialQuery) updateTypography({ headline: initialQuery })
+    if (paramName) updateTypography({
+      headline: paramName,
+      subheadline: !isNaN(paramLat) && !isNaN(paramLng)
+        ? `${paramLat.toFixed(4)}° N, ${Math.abs(paramLng).toFixed(4)}° ${paramLng < 0 ? 'W' : 'E'}`
+        : '',
+    })
   }, [])
 
   function handleLocationSelect(result) {
